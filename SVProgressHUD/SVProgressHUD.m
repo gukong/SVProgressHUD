@@ -743,6 +743,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
 - (void)moveToPoint:(CGPoint)newCenter rotateAngle:(CGFloat)angle{
     self.hudView.transform = CGAffineTransformMakeRotation(angle);
     self.hudView.center = CGPointMake(newCenter.x + self.offsetFromCenter.horizontal, newCenter.y + self.offsetFromCenter.vertical);
+    [self setNeedsDisplay];
 }
 
 
