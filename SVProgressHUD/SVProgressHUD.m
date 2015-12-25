@@ -45,6 +45,8 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
 
 @property (nonatomic, readonly) CGFloat visibleKeyboardHeight;
 
+@property (nonatomic, strong) UIView *restoreFirstResponder;
+
 - (void)updateHUDFrame;
 - (void)updateMask;
 - (void)updateBlurBounds;
@@ -64,7 +66,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
 
 - (void)overlayViewDidReceiveTouchEvent:(id)sender forEvent:(UIEvent*)event;
 
-- (void)showProgress:(float)progress status:(NSString*)string;
+- (void)showProgress:(float)progress status:(NSString*)string restoreKeyboard:(BOOL)restoreKeyboard;
 - (void)showImage:(UIImage*)image status:(NSString*)status duration:(NSTimeInterval)duration;
 
 - (void)dismissWithDelay:(NSTimeInterval)delay;
@@ -190,7 +192,11 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
 
 + (void)showWithStatus:(NSString*)status{
     [self sharedView];
-    [self showProgress:SVProgressHUDUndefinedProgress status:status];
+    [self showWithStatus:status restoreKeyboard:NO];
+}
+
++ (void)showWithStatus:(NSString*)status restoreKeyboard:(BOOL)restore {
+    [self showProgress:SVProgressHUDUndefinedProgress status:status restoreKeyboard:restore];
 }
 
 + (void)showWithStatus:(NSString*)status maskType:(SVProgressHUDMaskType)maskType{
@@ -201,7 +207,11 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
 }
 
 + (void)showProgress:(float)progress{
-    [self showProgress:progress status:nil];
+    [self showProgress:progress restoreKeyboard:NO];
+}
+
++ (void)showProgress:(float)progress restoreKeyboard:(BOOL)restore {
+    [self showProgress:progress status:nil restoreKeyboard:restore];
 }
 
 + (void)showProgress:(float)progress maskType:(SVProgressHUDMaskType)maskType{
@@ -211,8 +221,8 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
     [self setDefaultMaskType:existingMaskType];
 }
 
-+ (void)showProgress:(float)progress status:(NSString*)status{
-    [[self sharedView] showProgress:progress status:status];
++ (void)showProgress:(float)progress status:(NSString*)status restoreKeyboard:(BOOL)restoreKeyboard {
+    [[self sharedView] showProgress:progress status:status restoreKeyboard:restoreKeyboard];
 }
 
 + (void)showProgress:(float)progress status:(NSString*)status maskType:(SVProgressHUDMaskType)maskType{
@@ -318,7 +328,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
         _defaultMaskType = SVProgressHUDMaskTypeNone;
         _defaultStyle = SVProgressHUDStyleLight;
         _defaultAnimationType = SVProgressHUDAnimationTypeFlat;
-
+        
         // add accessibility support
         self.accessibilityIdentifier = @"SVProgressHUD";
         self.accessibilityLabel = @"SVProgressHUD";
@@ -337,7 +347,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
         UIImage* infoImage = [UIImage imageWithContentsOfFile:[imageBundle pathForResource:@"info" ofType:@"png"]];
         UIImage* successImage = [UIImage imageWithContentsOfFile:[imageBundle pathForResource:@"success" ofType:@"png"]];
         UIImage* errorImage = [UIImage imageWithContentsOfFile:[imageBundle pathForResource:@"error" ofType:@"png"]];
-
+        
         if ([[UIImage class] instancesRespondToSelector:@selector(imageWithRenderingMode:)]) {
             _infoImage = [infoImage imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
             _successImage = [successImage imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
@@ -347,7 +357,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
             _successImage = successImage;
             _errorImage = errorImage;
         }
-
+        
         _ringThickness = 2;
         _ringRadius = 18;
         _ringNoTextRadius = 24;
@@ -396,7 +406,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
             }
             stringRect = CGRectMake(0.0f, 0.0f, stringSize.width, stringSize.height);
         }
-
+        
         CGFloat stringWidth = stringRect.size.width;
         CGFloat stringHeight = ceilf(CGRectGetHeight(stringRect));
         
@@ -428,15 +438,15 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
     } else{
        	self.imageView.center = CGPointMake(CGRectGetWidth(self.hudView.bounds)/2, CGRectGetHeight(self.hudView.bounds)/2);
     }
-
-	self.stringLabel.hidden = NO;
-	self.stringLabel.frame = labelRect;
+    
+    self.stringLabel.hidden = NO;
+    self.stringLabel.frame = labelRect;
     
     // Animate value update
     [CATransaction begin];
     [CATransaction setValue:(id)kCFBooleanTrue forKey:kCATransactionDisableActions];
     
-	if(string) {
+    if(string) {
         if(self.defaultAnimationType == SVProgressHUDAnimationTypeFlat) {
             SVIndefiniteAnimatedView *indefiniteAnimationView = (SVIndefiniteAnimatedView *)self.indefiniteAnimatedView;
             indefiniteAnimationView.radius = self.ringRadius;
@@ -449,7 +459,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
         if(self.progress != SVProgressHUDUndefinedProgress){
             self.backgroundRingLayer.position = self.ringLayer.position = CGPointMake((CGRectGetWidth(self.hudView.bounds)/2), 36.0f);
         }
-	} else {
+    } else {
         if(self.defaultAnimationType == SVProgressHUDAnimationTypeFlat) {
             SVIndefiniteAnimatedView *indefiniteAnimationView = (SVIndefiniteAnimatedView *)self.indefiniteAnimatedView;
             indefiniteAnimationView.radius = self.ringNoTextRadius;
@@ -468,29 +478,31 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
 }
 
 - (void)updateMask{
-    if(self.backgroundLayer){
-        [self.backgroundLayer removeFromSuperlayer];
-        self.backgroundLayer = nil;
+    if(self.backgroundLayer == nil) {
+        self.backgroundLayer = [SVRadialGradientLayer layer];
+        self.backgroundLayer.frame = self.bounds;
     }
     switch (self.defaultMaskType){
         case SVProgressHUDMaskTypeBlack:{
+            if (![self.backgroundLayer isMemberOfClass:[CALayer class]]) {
+                [self.backgroundLayer removeFromSuperlayer];
+                self.backgroundLayer = [CALayer layer];
+                self.backgroundLayer.frame = self.bounds;
+            }
             
-            self.backgroundLayer = [CALayer layer];
-            self.backgroundLayer.frame = self.bounds;
             self.backgroundLayer.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5].CGColor;
             [self.backgroundLayer setNeedsDisplay];
             
             [self.layer insertSublayer:self.backgroundLayer atIndex:0];
             break;
         }
-            
         case SVProgressHUDMaskTypeGradient:{
-            SVRadialGradientLayer *layer = [SVRadialGradientLayer layer];
-            self.backgroundLayer = layer;
-            self.backgroundLayer.frame = self.bounds;
-            CGPoint gradientCenter = self.center;
-            gradientCenter.y = (self.bounds.size.height - self.visibleKeyboardHeight) / 2;
-            layer.gradientCenter = gradientCenter;
+            if (![self.backgroundLayer isMemberOfClass:[SVRadialGradientLayer class]]) {
+                [self.backgroundLayer removeFromSuperlayer];
+                self.backgroundLayer = [SVRadialGradientLayer layer];
+                self.backgroundLayer.frame = self.bounds;
+            }
+            ((SVRadialGradientLayer *)self.backgroundLayer).gradientCenter = self.hudView.center;
             [self.backgroundLayer setNeedsDisplay];
             
             [self.layer insertSublayer:self.backgroundLayer atIndex:0];
@@ -619,7 +631,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
 - (void)positionHUD:(NSNotification*)notification{
     CGFloat keyboardHeight = 0.0f;
     double animationDuration = 0.0;
-
+    
 #if !defined(SV_APP_EXTENSIONS) && TARGET_OS_IOS
     self.frame = [[[UIApplication sharedApplication] delegate] window].bounds;
     UIInterfaceOrientation orientation = UIApplication.sharedApplication.statusBarOrientation;
@@ -662,7 +674,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
     
     // Get the currently active frame of the display (depends on orientation)
     CGRect orientationFrame = self.bounds;
-
+    
 #if !defined(SV_APP_EXTENSIONS) && TARGET_OS_IOS
     CGRect statusBarFrame = UIApplication.sharedApplication.statusBarFrame;
 #else
@@ -695,7 +707,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
     
     CGFloat posX = CGRectGetWidth(orientationFrame)/2.0f;
     CGFloat posY = floorf(activeHeight*0.45f);
-
+    
     CGFloat rotateAngle = 0.0;
     CGPoint newCenter = CGPointMake(posX, posY);
     
@@ -736,14 +748,12 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
         [self moveToPoint:newCenter rotateAngle:rotateAngle];
         [self.hudView setNeedsDisplay];
     }
-    
-    [self updateMask];
 }
 
 - (void)moveToPoint:(CGPoint)newCenter rotateAngle:(CGFloat)angle{
     self.hudView.transform = CGAffineTransformMakeRotation(angle);
     self.hudView.center = CGPointMake(newCenter.x + self.offsetFromCenter.horizontal, newCenter.y + self.offsetFromCenter.vertical);
-    [self setNeedsDisplay];
+    [self updateMask];
 }
 
 
@@ -763,7 +773,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
 
 #pragma mark - Master show/dismiss methods
 
-- (void)showProgress:(float)progress status:(NSString*)string{
+- (void)showProgress:(float)progress status:(NSString*)string restoreKeyboard:(BOOL)restoreKeyboard {
     if(!self.overlayView.superview){
 #if !defined(SV_APP_EXTENSIONS)
         NSEnumerator *frontToBackWindows = [UIApplication.sharedApplication.windows reverseObjectEnumerator];
@@ -876,6 +886,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
                                                                                userInfo:userInfo];
                              UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, nil);
                              UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, string);
+                             [self hideKeyboard:restoreKeyboard];
                          }];
         
         [self setNeedsDisplay];
@@ -984,6 +995,7 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
                                  //NSLog(@"keyWindow = %@", [[[UIApplication sharedApplication] delegate] window]);
                              }
                          }
+                         [self restoreKeyboard];
                      }];
 }
 
@@ -1209,6 +1221,34 @@ static const CGFloat SVProgressHUDUndefinedProgress = -1;
     }
 #endif
     return 0;
+}
+
+- (void)hideKeyboard:(BOOL)restoryKeyboard {
+    UIWindow *keyWindow = [[UIApplication sharedApplication] keyWindow];
+    UIView *firstResponder = [self findFirstResponder:keyWindow];
+    [firstResponder resignFirstResponder];
+    _restoreFirstResponder = firstResponder;
+    if (!restoryKeyboard) {
+        _restoreFirstResponder = nil;
+    }
+}
+
+- (void)restoreKeyboard {
+    [_restoreFirstResponder becomeFirstResponder];
+}
+
+- (id)findFirstResponder:(UIView *)view
+{
+    if (view.isFirstResponder) {
+        return view;
+    }
+    for (UIView *subView in view.subviews) {
+        UIView *firstRespinder = [self findFirstResponder:subView];
+        if (firstRespinder) {
+            return firstRespinder;
+        }
+    }
+    return nil;
 }
 
 #pragma mark - UIAppearance Setters
